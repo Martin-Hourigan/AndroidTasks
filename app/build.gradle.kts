@@ -23,8 +23,11 @@ android {
         applicationId = "dev.mahourigan.tasks"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1"
+        // CI passes these from the git tag, so the number that decides whether an
+        // update installs is derived rather than remembered. Local builds keep
+        // the defaults.
+        versionCode = (findProperty("appVersionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("appVersionName") as String?) ?: "0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

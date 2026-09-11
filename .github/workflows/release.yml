@@ -1,0 +1,116 @@
+name: Release
+
+# Tags and manual runs only. Deliberately NOT pull_request: this job can read
+# the signing secrets, and on a public repo anyone can open a pull request. A
+# workflow that runs fork code with access to secrets is the standard way
+# signing keys get stolen, so the trigger list is the security control.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, without the v (e.g. 0.2)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Must match gradle/gradle-daemon-jvm.properties, which pins 25. On a
+      # mismatch Gradle silently downloads its own JDK and the build takes
+      # several minutes longer for no reason.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      # Android refuses an update whose versionCode is not higher than the
+      # installed one, and fails with an unhelpful error when it happens. So
+      # the number is derived from the tag rather than remembered: 0.2 -> 200,
+      # 1.4.2 -> 10402. Monotonic as long as tags are.
+      - name: Version from the tag
+        id: version
+        run: |
+          RAW="${{ github.event.inputs.version || github.ref_name }}"
+          NAME="${RAW#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$NAME"
+          CODE=$(( ${MAJOR:-0} * 10000 + ${MINOR:-0} * 100 + ${PATCH:-0} ))
+          if [ "$CODE" -le 0 ]; then
+            echo "::error::Refusing to build $RAW — it yields versionCode $CODE, which cannot update anything."
+            exit 1
+          fi
+          echo "name=$NAME"  >> "$GITHUB_OUTPUT"
+          echo "code=$CODE"  >> "$GITHUB_OUTPUT"
+          echo "Building $NAME as versionCode $CODE"
+
+      # Written to a file rather than passed on the command line: arguments
+      # are visible in process listings, and Gradle echoes them on failure.
+      - name: Restore the signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::SIGNING_KEYSTORE_BASE64 is not set — the build would produce an unsigned APK nobody can install as an update."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          mkdir -p ~/.gradle
+          {
+            echo "signingStoreFile=$RUNNER_TEMP/release.jks"
+            echo "signingStorePassword=$STORE_PASSWORD"
+            echo "signingKeyPassword=$STORE_PASSWORD"
+          } >> ~/.gradle/gradle.properties
+
+      - name: Tests
+        run: ./gradlew test --no-daemon
+
+      - name: Build
+        run: |
+          ./gradlew assembleRelease --no-daemon \
+            -PappVersionName=${{ steps.version.outputs.name }} \
+            -PappVersionCode=${{ steps.version.outputs.code }}
+
+      # An unsigned APK builds perfectly happily and then cannot be installed
+      # over anything, so this is checked rather than assumed.
+      - name: Check it is actually signed
+        run: |
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          SIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
+          "$SIGNER" verify --print-certs "$APK" | grep -q 'CN=mahourigan' \
+            || { echo "::error::APK is unsigned or signed by the wrong key"; exit 1; }
+          mv "$APK" "${{ github.event.repository.name }}-${{ steps.version.outputs.name }}.apk"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.version.outputs.name }}"
+          FILE="${{ github.event.repository.name }}-${{ steps.version.outputs.name }}.apk"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" --clobber
+          else
+            gh release create "$TAG" "$FILE" \
+              --title "${{ github.event.repository.name }} ${{ steps.version.outputs.name }}" \
+              --generate-notes
+          fi
+
+      - name: Shred the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" ~/.gradle/gradle.properties
