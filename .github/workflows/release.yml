@@ -22,17 +22,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Must match gradle/gradle-daemon-jvm.properties, which pins 25. On a
       # mismatch Gradle silently downloads its own JDK and the build takes
       # several minutes longer for no reason.
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
