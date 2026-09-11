@@ -15,6 +15,15 @@
     <!-- Alarms do not survive a reboot; the receiver re-arms them. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- The only network this app does: asking GitHub whether a newer build
+         exists, and fetching it. Nothing is uploaded and nothing is tracked. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Needed to hand a downloaded APK to the system installer. It does not
+         let the app install anything silently — Android still shows its own
+         confirmation, and still refuses any APK not signed by the same key. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -49,6 +58,13 @@
                 <action android:name="android.intent.action.TIME_SET" />
             </intent-filter>
         </receiver>
+
+
+        <!-- Where the install session reports back. Not exported: only the
+             system's own PendingIntent targets it. -->
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false" />
 
     </application>
 

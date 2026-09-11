@@ -134,6 +134,11 @@ fun SettingsScreen(
             detail = "Replace everything from an export",
             onClick = onImport,
         )
+
+        HorizontalDivider()
+
+        // Last, because it is housekeeping rather than configuration.
+        UpdateRow()
     }
 }
 

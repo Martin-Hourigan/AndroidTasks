@@ -5,3 +5,9 @@
     <init>();
     <fields>;
 }
+
+# The install-result receiver is built by name from the manifest. Keeping its
+# constructor explicitly rather than trusting a manifest rule to cover members
+# — that assumption is exactly what silently broke the MoonWidget panel, where
+# R8 kept the class and dropped the constructor Glance needed to reflect on.
+-keep class dev.mahourigan.tasks.update.InstallResultReceiver { <init>(); }
