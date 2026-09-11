@@ -1,0 +1,27 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+# Generated output, at any depth. '/build' alone only matches the root
+# one and lets app/build through, which is tens of megabytes of
+# generated code that git would then keep forever.
+build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Firebase config and signing material never belong in version control.
+/app/google-services.json
+/keystore.properties
+*.jks
+*.keystore
+
+# Build output. An APK is rebuilt from source any time, and git keeps
+# every copy forever — finished builds belong on a GitHub Release.
+*.apk
+*.aab
+
+# Crash dumps from MSYS tools; nothing to do with the app.
+*.stackdump
