@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.mahourigan.tasks.BuildConfig
+import dev.mahourigan.tasks.update.InstallStart
 import dev.mahourigan.tasks.update.ReleaseVersion
 import dev.mahourigan.tasks.update.UpdateInstaller
 import dev.mahourigan.tasks.update.Updates
@@ -31,6 +32,15 @@ private sealed interface UpdateState {
     data object Failed : UpdateState
     data class Available(val release: ReleaseVersion) : UpdateState
     data class Downloading(val release: ReleaseVersion) : UpdateState
+
+    /**
+     * Android will not let this app install anything yet.
+     *
+     * A separate state rather than a failure, because it is not one: nothing
+     * has gone wrong, there is simply a switch the person has to flick, and
+     * the row can take them straight to it.
+     */
+    data class NeedsPermission(val release: ReleaseVersion) : UpdateState
 }
 
 /**
@@ -63,6 +73,9 @@ fun UpdateRow() {
         UpdateState.Failed -> "Could not reach GitHub. Try again later."
         is UpdateState.Available -> "Version ${current.release.name} is available"
         is UpdateState.Downloading -> "Downloading ${current.release.name}…"
+        is UpdateState.NeedsPermission ->
+            "Android needs your permission to install apps from here. Tap to allow it, " +
+                "then tap again to install ${current.release.name}."
     }
 
     val action: () -> Unit = when (current) {
@@ -70,18 +83,35 @@ fun UpdateRow() {
         // second download of the same file.
         UpdateState.Checking, is UpdateState.Downloading -> ({})
 
+        // Sending them to the system screen that grants it. Coming back,
+        // a second tap installs.
+        is UpdateState.NeedsPermission -> ({
+            runCatching { context.startActivity(UpdateInstaller.permissionSettings(context)) }
+            state = UpdateState.Available(current.release)
+        })
+
         is UpdateState.Available -> ({
             val release = current.release
-            state = UpdateState.Downloading(release)
-            scope.launch {
-                val apk = Updates.download(context, release)
-                state = if (apk != null && UpdateInstaller.install(context, apk)) {
-                    // The system prompt takes over. Back to Idle so that
-                    // declining it leaves the row usable rather than stuck
-                    // saying "Downloading" for ever.
-                    UpdateState.Idle
-                } else {
-                    UpdateState.Failed
+            if (!UpdateInstaller.canInstall(context)) {
+                // Checked before downloading rather than after: three megabytes
+                // fetched and then silently discarded is a poor way to find out
+                // about a permission.
+                state = UpdateState.NeedsPermission(release)
+            } else {
+                state = UpdateState.Downloading(release)
+                scope.launch {
+                    val apk = Updates.download(context, release)
+                    state = when {
+                        apk == null -> UpdateState.Failed
+                        else -> when (UpdateInstaller.install(context, apk)) {
+                            // The system prompt takes over. Back to Idle so that
+                            // declining it leaves the row usable rather than
+                            // stuck saying "Downloading" for ever.
+                            InstallStart.STARTED -> UpdateState.Idle
+                            InstallStart.NEEDS_PERMISSION -> UpdateState.NeedsPermission(release)
+                            InstallStart.FAILED -> UpdateState.Failed
+                        }
+                    }
                 }
             }
         })
@@ -106,7 +136,11 @@ fun UpdateRow() {
             .padding(horizontal = 4.dp, vertical = 12.dp),
     ) {
         Text(
-            text = if (current is UpdateState.Available) "Download and install" else "Check for updates",
+            text = when (current) {
+                is UpdateState.Available -> "Download and install"
+                is UpdateState.NeedsPermission -> "Allow installing updates"
+                else -> "Check for updates"
+            },
             style = MaterialTheme.typography.titleSmall,
         )
         Spacer(Modifier.height(2.dp))
